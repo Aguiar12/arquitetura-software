@@ -1,0 +1,95 @@
+version: '2.1'
+services:
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:6.1.1
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka:
+    image: confluentinc/cp-kafka:6.1.1
+    depends_on:
+      - zookeeper
+    ports:
+      - '9092:9092'
+    expose:
+      - '29092'
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_MIN_INSYNC_REPLICAS: '1'
+
+  init-kafka:
+    image: confluentinc/cp-kafka:6.1.1
+    depends_on:
+      - kafka
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      # blocks until kafka is reachable
+      kafka-topics --bootstrap-server kafka:29092 --list
+
+      echo -e 'Creating kafka topics'
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic orders-events --replication-factor 1 --partitions 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic orders-created --replication-factor 1 --partitions 1
+
+      echo -e 'Successfully created the following topics:'
+      kafka-topics --bootstrap-server kafka:29092 --list
+      "
+  
+  clients-service:
+    container_name: clients-service
+    build: 
+      context: client
+      dockerfile: DockerFile
+    image: clients-service:latest
+    ports:
+      - 8081:8080
+    networks:
+      - applications
+    depends_on:
+      - init-kafka
+  
+  orders-service:
+    container_name: orders-service
+    build: 
+      context: order
+      dockerfile: DockerFile
+    image: orders-service:latest
+    ports:
+      - 8082:8080
+    networks:
+      - applications
+    depends_on:
+      - init-kafka
+
+  products-service:
+    container_name: products-service
+    build: 
+      context: product
+      dockerfile: DockerFile
+    image: products-service:latest
+    ports:
+      - 8083:8080
+    networks:
+      - applications
+  
+  checkout-service:
+    container_name: checkout-service
+    build: 
+      context: checkout
+      dockerfile: DockerFile
+    image: checkout-service:latest
+    ports:
+      - 8080:8080
+    networks:
+      - applications
+
+networks:
+  applications:
+    driver: bridge
